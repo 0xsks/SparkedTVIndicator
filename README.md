@@ -1,0 +1,2 @@
+# SparkedTVIndicator
+Lit AF trading
