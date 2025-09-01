@@ -1,0 +1,188 @@
+// This Pine Script® code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © Sparked0x
+
+//@version=6
+indicator("Sparked Beta vCAT.01", shorttitle="Sparked Beta vCAT.01", overlay=true, max_boxes_count=500, max_lines_count=500)
+
+//Todo
+
+//***INDICATOR INPUTS***
+// Add ADR 
+// Add VRVP
+
+// ***SR EDITS***
+// Make SR boxes draw to end of chart and not just till latest bar
+//Zone age filter → auto-fade or delete zones after n bars.
+//Touch count → mark zones that got retested multiple times (stronger).
+//Break/flip logic → if price decisively breaks a zone, flip its color to show it as invalid or “flipped support/resistance.”
+// Add sensitivity slider for 1m/5m scalping zones (to control how “tight” or “loose” the demand/supply boxes print)?
+
+
+//RSI EDITS
+// Add RSI bar color overlay options
+// Coloring to encourage good psychology (unobtrusive)
+//RSI Divergence detection → draw lines when price makes new highs but RSI doesn’t (and vice versa).
+
+// ***VWAP EDITS***
+// Time options for VWAP resets
+//Session VWAP selector → toggle between “entire day,” “session,” or “rolling anchor.”
+//Custom deviation profiles → e.g., 0.25, 0.5, 1.0 bands for scalping, 1.5, 2.0 for swing.
+//VWAP confluence signals → highlight when EMA200, VWAP, and SD zone overlap (high-probability scalp).
+
+// ***BB EDITS***
+// Fix Bollinger Bands not showing on chart
+
+//Visualization
+//Toggleable zone styles → filled boxes vs. dashed outlines (for minimal clutter).
+//Transparency slider → fade older zones.
+//Labels for HTF zones → small text like “1H Supply” or “4H Demand.”
+
+//Automation / Smart features
+//Scalp alerts → when price touches a fresh demand zone + RSI oversold + near VWAP band.
+//Trend filter → only show demand zones in uptrend, supply in downtrend (avoid counter-trend traps).
+//Liquidity sweep detection → wick into a zone with rejection → potential scalp trigger.
+
+// =============================
+// === Inputs
+// =============================
+
+// Supply/Demand Zones
+sdLen      = input.int(20, "Swing Length", minval=1)
+sdHTF1     = input.timeframe("60", "Higher TF 1 (zones)")
+sdHTF2     = input.timeframe("240", "Higher TF 2 (zones)")
+showSD     = input.bool(true, "Show Supply/Demand Zones")
+
+// EMA
+showEMA200 = input.bool(true, "Show EMA 200")
+
+// VWAP + Deviations
+showVWAP   = input.bool(true, "Show VWAP + Deviations")
+vwapSrc    = input.source(close, "VWAP Source")
+vwapDevOn  = input.bool(true, "Show Deviation Bands")
+vwapDevSet = input.string("Daily", "VWAP Reset", options=["Session", "Daily", "Weekly", "Monthly"])
+devSteps   = input.string("0.5,1,1.5,2", "Deviation Multipliers (comma separated)")
+
+// RSI & Bollinger
+showRSI    = input.bool(false, "Overlay RSI signals")
+rsiLen     = input.int(14, "RSI Length")
+showBB     = input.bool(false, "Show Bollinger Bands")
+bbLen      = input.int(20, "BB Length")
+bbMult     = input.float(2.0, "BB Multiplier")
+
+// =============================
+// === Core Logic
+// =============================
+
+// EMA200
+ema200 = ta.ema(close, 200)
+plot(showEMA200 ? ema200 : na, "EMA 200", color=color.orange, linewidth=2)
+
+// VWAP core (built-in)
+vwap = ta.vwap(vwapSrc)
+plot(showVWAP ? vwap : na, "VWAP", color=color.blue, linewidth=2)
+
+// VWAP Deviations (std dev bands)
+devList = str.split(devSteps, ",")
+devStdev = ta.stdev(vwapSrc, 100)
+
+// Parse deviation steps
+step0 = str.tonumber(array.get(devList, 0))
+step1 = str.tonumber(array.get(devList, 1))
+step2 = str.tonumber(array.get(devList, 2))
+step3 = str.tonumber(array.get(devList, 3))
+
+// Plot VWAP deviation bands at root level
+plot(showVWAP and vwapDevOn and not na(step0) ? vwap + step0 * devStdev : na, "VWAP +0.5", color=color.new(color.blue, 60))
+plot(showVWAP and vwapDevOn and not na(step0) ? vwap - step0 * devStdev : na, "VWAP -0.5", color=color.new(color.blue, 60))
+
+plot(showVWAP and vwapDevOn and not na(step1) ? vwap + step1 * devStdev : na, "VWAP +1.0", color=color.new(color.blue, 60))
+plot(showVWAP and vwapDevOn and not na(step1) ? vwap - step1 * devStdev : na, "VWAP -1.0", color=color.new(color.blue, 60))
+
+plot(showVWAP and vwapDevOn and not na(step2) ? vwap + step2 * devStdev : na, "VWAP +1.5", color=color.new(color.blue, 60))
+plot(showVWAP and vwapDevOn and not na(step2) ? vwap - step2 * devStdev : na, "VWAP -1.5", color=color.new(color.blue, 60))
+
+plot(showVWAP and vwapDevOn and not na(step3) ? vwap + step3 * devStdev : na, "VWAP +2.0", color=color.new(color.blue, 60))
+plot(showVWAP and vwapDevOn and not na(step3) ? vwap - step3 * devStdev : na, "VWAP -2.0", color=color.new(color.blue, 60))
+
+// Bollinger Bands
+basis = ta.sma(close, bbLen)
+dev   = ta.stdev(close, bbLen)
+upper = basis + bbMult * dev
+lower = basis - bbMult * dev
+
+plot(showBB ? basis : na, "BB Basis", color=color.gray)
+plot(showBB ? upper : na, "BB Upper", color=color.green)
+plot(showBB ? lower : na, "BB Lower", color=color.red)
+
+// RSI (overlay via barcolor)
+rsi = ta.rsi(close, rsiLen)
+barcolor(showRSI ? (rsi > 70 ? color.new(color.red, 0) : rsi < 30 ? color.new(color.green, 0) : na) : na)
+
+// =============================
+// === Supply/Demand Zones (fractal-based)
+// =============================
+
+f_swingHigh(len) =>
+    high[len] == ta.highest(high, len * 2 + 1)
+
+f_swingLow(len) =>
+    low[len] == ta.lowest(low, len * 2 + 1)
+
+var box[] demandZones = array.new<box>()
+var box[] supplyZones = array.new<box>()
+
+if showSD
+    if f_swingHigh(sdLen)
+        zoneHeight = high[sdLen] - low[sdLen]
+        if zoneHeight > 0
+            newBox = box.new(left=bar_index - sdLen, top=high[sdLen], right=bar_index, bottom=high[sdLen] - zoneHeight / 2, border_color=color.red, bgcolor=color.new(color.red, 80))
+            array.push(supplyZones, newBox)
+    if f_swingLow(sdLen)
+        zoneHeight = high[sdLen] - low[sdLen]
+        if zoneHeight > 0
+            newBox = box.new(left=bar_index - sdLen, top=low[sdLen] + zoneHeight / 2, right=bar_index, bottom=low[sdLen], border_color=color.green, bgcolor=color.new(color.green, 80))
+            array.push(demandZones, newBox)
+
+// Clean up old zones when broken (reverse loop to avoid index issues)
+if array.size(supplyZones) > 0
+    for i = array.size(supplyZones) - 1 to 0
+        b = array.get(supplyZones, i)
+        if close > box.get_top(b)
+            box.delete(b)
+            array.remove(supplyZones, i)
+
+if array.size(demandZones) > 0
+    for i = array.size(demandZones) - 1 to 0
+        b = array.get(demandZones, i)
+        if close < box.get_bottom(b)
+            box.delete(b)
+            array.remove(demandZones, i)
+
+// =============================
+// === Higher Timeframe Zones
+// =============================
+
+var line[] htfLines = array.new<line>()
+
+f_drawHTFZones(tf, col) =>
+    htfHigh = request.security(syminfo.tickerid, tf, high)
+    htfLow  = request.security(syminfo.tickerid, tf, low)
+    
+    // Clean up old lines first
+    if array.size(htfLines) > 0
+        for i = array.size(htfLines) - 1 to 0
+            line.delete(array.get(htfLines, i))
+            array.remove(htfLines, i)
+    
+    // Create new lines
+    highLine = line.new(bar_index - 50, htfHigh, bar_index, htfHigh, color=col, extend=extend.right, style=line.style_dashed)
+    lowLine = line.new(bar_index - 50, htfLow, bar_index, htfLow, color=col, extend=extend.right, style=line.style_dashed)
+    
+    array.push(htfLines, highLine)
+    array.push(htfLines, lowLine)
+
+if showSD
+    f_drawHTFZones(sdHTF1, color.new(color.red, 70))
+    f_drawHTFZones(sdHTF2, color.new(color.green, 70))
+
+    //end script
