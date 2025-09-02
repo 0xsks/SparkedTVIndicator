@@ -2,16 +2,10 @@
 // © Sparked0x
 
 //@version=6
-indicator("Sparked Beta vCAT.01", shorttitle="Sparked Beta vCAT.01", overlay=true, max_boxes_count=500, max_lines_count=500)
+indicator("Sparked Beta v.02", shorttitle="Sparked", overlay=true, max_boxes_count=500, max_lines_count=500)
 
 //Todo
-
-//***INDICATOR INPUTS***
-// Add ADR 
-// Add VRVP
-
 // ***SR EDITS***
-// Make SR boxes draw to end of chart and not just till latest bar
 //Zone age filter → auto-fade or delete zones after n bars.
 //Touch count → mark zones that got retested multiple times (stronger).
 //Break/flip logic → if price decisively breaks a zone, flip its color to show it as invalid or “flipped support/resistance.”
@@ -19,8 +13,6 @@ indicator("Sparked Beta vCAT.01", shorttitle="Sparked Beta vCAT.01", overlay=tru
 
 
 //RSI EDITS
-// Add RSI bar color overlay options
-// Coloring to encourage good psychology (unobtrusive)
 //RSI Divergence detection → draw lines when price makes new highs but RSI doesn’t (and vice versa).
 
 // ***VWAP EDITS***
@@ -51,12 +43,14 @@ sdLen      = input.int(20, "Swing Length", minval=1)
 sdHTF1     = input.timeframe("60", "Higher TF 1 (zones)")
 sdHTF2     = input.timeframe("240", "Higher TF 2 (zones)")
 showSD     = input.bool(true, "Show Supply/Demand Zones")
+srExtendBars = input.int(5000, "SR Extend Bars", minval=100)
+srFullRange  = input.bool(true, "SR Use Full Swing Range")
 
 // EMA
 showEMA200 = input.bool(true, "Show EMA 200")
 
 // VWAP + Deviations
-showVWAP   = input.bool(true, "Show VWAP + Deviations")
+showVWAP   = input.bool(false, "Show VWAP + Deviations")
 vwapSrc    = input.source(close, "VWAP Source")
 vwapDevOn  = input.bool(true, "Show Deviation Bands")
 vwapDevSet = input.string("Daily", "VWAP Reset", options=["Session", "Daily", "Weekly", "Monthly"])
@@ -65,44 +59,71 @@ devSteps   = input.string("0.5,1,1.5,2", "Deviation Multipliers (comma separated
 // RSI & Bollinger
 showRSI    = input.bool(false, "Overlay RSI signals")
 rsiLen     = input.int(14, "RSI Length")
+// RSI gradient controls
+rsiLowerThr = input.int(30, "RSI Lower Threshold", minval=0, maxval=50)
+rsiUpperThr = input.int(70, "RSI Upper Threshold", minval=50, maxval=100)
+rsiMaxIntensity = input.int(100, "RSI Max Intensity (0-100)", minval=1, maxval=100)
 showBB     = input.bool(false, "Show Bollinger Bands")
 bbLen      = input.int(20, "BB Length")
 bbMult     = input.float(2.0, "BB Multiplier")
+
+// Trend Oscillator (MACD-style)
+showTO     = input.bool(true, "Show Trend Oscillator")
+toFastLen  = input.int(34, "TO Fast EMA")
+toSlowLen  = input.int(55, "TO Slow EMA")
+toSignal   = input.int(9, "TO Signal EMA")
+
+// Visible Range Volume Profile (approximation via lookback)
+showVRVP          = input.bool(false, "Show Visible Range Volume Profile")
+vrvpLookbackBars  = input.int(200, "VRVP Lookback Bars", minval=10, maxval=5000)
+vrvpBins          = input.int(24, "VRVP Price Bins", minval=10, maxval=200)
+vrvpMaxWidthBars  = input.int(50, "VRVP Max Width (bars)", minval=5, maxval=200)
+
+// ADR (New York session)
+showADR    = input.bool(true, "Show NY Session ADR")
+adrLen     = input.int(14, "ADR Length (NY sessions)", minval=1)
+nySession  = input.session("0930-1600", "NY Session (chart timezone)")
 
 // =============================
 // === Core Logic
 // =============================
 
-// EMA200
+// EMA200 (high transparency like SR boxes)
 ema200 = ta.ema(close, 200)
-plot(showEMA200 ? ema200 : na, "EMA 200", color=color.orange, linewidth=2)
+ema200BaseColor = close > ema200 ? color.red : color.green
+ema200Color = color.new(ema200BaseColor, 80)
+plot(showEMA200 ? ema200 : na, "EMA 200", color=ema200Color, linewidth=2, display=display.pane)
 
 // VWAP core (built-in)
 vwap = ta.vwap(vwapSrc)
-plot(showVWAP ? vwap : na, "VWAP", color=color.blue, linewidth=2)
+plot(showVWAP ? vwap : na, "VWAP", color=color.blue, linewidth=2, display=display.pane)
 
 // VWAP Deviations (std dev bands)
 devList = str.split(devSteps, ",")
 devStdev = ta.stdev(vwapSrc, 100)
 
-// Parse deviation steps
-step0 = str.tonumber(array.get(devList, 0))
-step1 = str.tonumber(array.get(devList, 1))
-step2 = str.tonumber(array.get(devList, 2))
-step3 = str.tonumber(array.get(devList, 3))
+// Safe access for deviation steps
+f_getStep(list, idx) =>
+    array.size(list) > idx ? str.tonumber(array.get(list, idx)) : na
+
+// Parse deviation steps safely
+step0 = f_getStep(devList, 0)
+step1 = f_getStep(devList, 1)
+step2 = f_getStep(devList, 2)
+step3 = f_getStep(devList, 3)
 
 // Plot VWAP deviation bands at root level
-plot(showVWAP and vwapDevOn and not na(step0) ? vwap + step0 * devStdev : na, "VWAP +0.5", color=color.new(color.blue, 60))
-plot(showVWAP and vwapDevOn and not na(step0) ? vwap - step0 * devStdev : na, "VWAP -0.5", color=color.new(color.blue, 60))
+plot(showVWAP and vwapDevOn and not na(step0) ? vwap + step0 * devStdev : na, "VWAP +0.5", color=color.new(color.blue, 60), display=display.pane)
+plot(showVWAP and vwapDevOn and not na(step0) ? vwap - step0 * devStdev : na, "VWAP -0.5", color=color.new(color.blue, 60), display=display.pane)
 
-plot(showVWAP and vwapDevOn and not na(step1) ? vwap + step1 * devStdev : na, "VWAP +1.0", color=color.new(color.blue, 60))
-plot(showVWAP and vwapDevOn and not na(step1) ? vwap - step1 * devStdev : na, "VWAP -1.0", color=color.new(color.blue, 60))
+plot(showVWAP and vwapDevOn and not na(step1) ? vwap + step1 * devStdev : na, "VWAP +1.0", color=color.new(color.blue, 60), display=display.pane)
+plot(showVWAP and vwapDevOn and not na(step1) ? vwap - step1 * devStdev : na, "VWAP -1.0", color=color.new(color.blue, 60), display=display.pane)
 
-plot(showVWAP and vwapDevOn and not na(step2) ? vwap + step2 * devStdev : na, "VWAP +1.5", color=color.new(color.blue, 60))
-plot(showVWAP and vwapDevOn and not na(step2) ? vwap - step2 * devStdev : na, "VWAP -1.5", color=color.new(color.blue, 60))
+plot(showVWAP and vwapDevOn and not na(step2) ? vwap + step2 * devStdev : na, "VWAP +1.5", color=color.new(color.blue, 60), display=display.pane)
+plot(showVWAP and vwapDevOn and not na(step2) ? vwap - step2 * devStdev : na, "VWAP -1.5", color=color.new(color.blue, 60), display=display.pane)
 
-plot(showVWAP and vwapDevOn and not na(step3) ? vwap + step3 * devStdev : na, "VWAP +2.0", color=color.new(color.blue, 60))
-plot(showVWAP and vwapDevOn and not na(step3) ? vwap - step3 * devStdev : na, "VWAP -2.0", color=color.new(color.blue, 60))
+plot(showVWAP and vwapDevOn and not na(step3) ? vwap + step3 * devStdev : na, "VWAP +2.0", color=color.new(color.blue, 60), display=display.pane)
+plot(showVWAP and vwapDevOn and not na(step3) ? vwap - step3 * devStdev : na, "VWAP -2.0", color=color.new(color.blue, 60), display=display.pane)
 
 // Bollinger Bands
 basis = ta.sma(close, bbLen)
@@ -110,17 +131,142 @@ dev   = ta.stdev(close, bbLen)
 upper = basis + bbMult * dev
 lower = basis - bbMult * dev
 
-plot(showBB ? basis : na, "BB Basis", color=color.gray)
-plot(showBB ? upper : na, "BB Upper", color=color.green)
-plot(showBB ? lower : na, "BB Lower", color=color.red)
+plot(showBB ? basis : na, "BB Basis", color=color.gray, display=display.pane)
+plot(showBB ? upper : na, "BB Upper", color=color.green, display=display.pane)
+plot(showBB ? lower : na, "BB Lower", color=color.red, display=display.pane)
 
-// RSI (overlay via barcolor)
+// RSI (overlay via barcolor) simple red/green (no transparency)
 rsi = ta.rsi(close, rsiLen)
-barcolor(showRSI ? (rsi > 70 ? color.new(color.red, 0) : rsi < 30 ? color.new(color.green, 0) : na) : na)
+rsiColor = rsi > rsiUpperThr ? color.red : rsi < rsiLowerThr ? color.green : na
+barcolor(showRSI ? rsiColor : na)
+
+// =============================
+// === Trend Oscillator (MACD-style)
+// =============================
+
+toFast = ta.ema(close, toFastLen)
+toSlow = ta.ema(close, toSlowLen)
+toMacd = toFast - toSlow
+toSig  = ta.ema(toMacd, toSignal)
+toHist = toMacd - toSig
+
+plot(showTO ? toMacd : na, "TO MACD", color=color.new(color.blue, 0), display=display.pane)
+plot(showTO ? toSig  : na, "TO Signal", color=color.new(color.orange, 0), display=display.pane)
+plot(showTO ? toHist : na, "TO Hist", style=plot.style_columns, color=toHist >= 0 ? color.new(color.green, 0) : color.new(color.red, 0), display=display.pane)
 
 // =============================
 // === Supply/Demand Zones (fractal-based)
 // =============================
+
+// =============================
+// === ADR (NY Session) - Range and Average of last N sessions
+// =============================
+
+// Detect NY session on the chart timeframe
+inNY = not na(time(timeframe.period, nySession))
+isNYStart = inNY and not inNY[1]
+isNYEnd   = not inNY and inNY[1]
+
+// Track current NY session high/low
+var float nyHigh = na
+var float nyLow  = na
+
+if isNYStart
+    nyHigh := high
+    nyLow  := low
+else if inNY
+    nyHigh := na(nyHigh) ? high : math.max(nyHigh, high)
+    nyLow  := na(nyLow)  ? low  : math.min(nyLow, low)
+
+// Maintain rolling array of completed NY session ranges
+var float[] nyRanges = array.new_float()
+
+if isNYEnd and showADR
+    completedRange = nyHigh - nyLow
+    if not na(completedRange) and completedRange >= 0
+        array.push(nyRanges, completedRange)
+        // cap to adrLen
+        if array.size(nyRanges) > adrLen
+            array.shift(nyRanges)
+
+// Compute ADR = average of nyRanges
+f_arrayAvg(arr) =>
+    sz = array.size(arr)
+    if sz == 0
+        na
+    else
+        total = 0.0
+        for i = 0 to sz - 1
+            total += array.get(arr, i)
+        total / sz
+
+adrValue = f_arrayAvg(nyRanges)
+todayNYRange = inNY or isNYEnd ? (nyHigh - nyLow) : na
+
+// Plots for current NY session High/Low
+plot(showADR and inNY ? nyHigh : na, "NY Session High", color=color.new(color.purple, 0), linewidth=1)
+plot(showADR and inNY ? nyLow  : na, "NY Session Low",  color=color.new(color.purple, 0), linewidth=1)
+
+// Small info table (top-right) with ADR and today's NY range
+var table adrTable = table.new(position.top_right, 1, 2)
+if barstate.islast and showADR
+    hdr = "NY ADR(" + str.tostring(adrLen) + ")"
+    val = (na(adrValue) ? "n/a" : str.tostring(adrValue, format.mintick)) + " | Today: " + (na(todayNYRange) ? "n/a" : str.tostring(todayNYRange, format.mintick))
+    table.cell(adrTable, 0, 0, hdr, text_color=color.white, text_size=size.small, bgcolor=color.new(color.black, 0))
+    table.cell(adrTable, 0, 1, val, text_color=color.white, text_size=size.small, bgcolor=color.new(color.black, 70))
+
+// =============================
+// === Visible Range Volume Profile (approximation)
+// =============================
+
+var box[] vrvpBoxes = array.new<box>()
+
+f_clearVRVP() =>
+    for i = array.size(vrvpBoxes) - 1 to 0
+        b = array.get(vrvpBoxes, i)
+        box.delete(b)
+        array.remove(vrvpBoxes, i)
+
+f_drawVRVP(lookbackBars, bins, maxWidthBars) =>
+    canRun = lookbackBars > 0 and bins > 1
+    if canRun
+        lb = math.min(lookbackBars, bar_index)
+        // Determine price range in lookback
+        lookHigh = ta.highest(high, lb)
+        lookLow  = ta.lowest(low, lb)
+        validRange = not na(lookHigh) and not na(lookLow) and lookHigh != lookLow
+        if validRange
+            step = (lookHigh - lookLow) / bins
+            // Avoid divide-by-zero
+            if step > 0
+                var float[] volBins = array.new_float(bins, 0.0)
+                // Accumulate volume per bin
+                for i = 0 to lb - 1
+                    price = close[i]
+                    v = volume[i]
+                    idx = math.floor((price - lookLow) / step)
+                    idx := idx < 0 ? 0 : idx > bins - 1 ? bins - 1 : idx
+                    array.set(volBins, idx, array.get(volBins, idx) + v)
+                // Find max volume for normalization
+                maxVol = 0.0
+                for k = 0 to bins - 1
+                    maxVol := math.max(maxVol, array.get(volBins, k))
+                if maxVol > 0 and barstate.islast
+                    // Clear previous
+                    f_clearVRVP()
+                    // Draw boxes as horizontal bars
+                    leftX = bar_index - lb
+                    for k = 0 to bins - 1
+                        binLow  = lookLow + k * step
+                        binHigh = binLow + step
+                        ratio = array.get(volBins, k) / maxVol
+                        widthBars = math.floor(ratio * maxWidthBars)
+                        if widthBars > 0
+                            b = box.new(left=leftX, right=leftX + widthBars, top=binHigh, bottom=binLow, xloc=xloc.bar_index, bgcolor=color.new(color.gray, 80), border_color=na)
+                            array.push(vrvpBoxes, b)
+
+if showVRVP
+    f_drawVRVP(vrvpLookbackBars, vrvpBins, vrvpMaxWidthBars)
 
 f_swingHigh(len) =>
     high[len] == ta.highest(high, len * 2 + 1)
@@ -135,12 +281,18 @@ if showSD
     if f_swingHigh(sdLen)
         zoneHeight = high[sdLen] - low[sdLen]
         if zoneHeight > 0
-            newBox = box.new(left=bar_index - sdLen, top=high[sdLen], right=bar_index, bottom=high[sdLen] - zoneHeight / 2, border_color=color.red, bgcolor=color.new(color.red, 80))
+            topVal = high[sdLen]
+            bottomVal = srFullRange ? low[sdLen] : high[sdLen] - zoneHeight / 2
+            maxExtend = math.min(srExtendBars, 500)
+            newBox = box.new(left=bar_index - sdLen, top=topVal, right=bar_index + maxExtend, bottom=bottomVal, border_color=na, bgcolor=color.new(color.red, 80))
             array.push(supplyZones, newBox)
     if f_swingLow(sdLen)
         zoneHeight = high[sdLen] - low[sdLen]
         if zoneHeight > 0
-            newBox = box.new(left=bar_index - sdLen, top=low[sdLen] + zoneHeight / 2, right=bar_index, bottom=low[sdLen], border_color=color.green, bgcolor=color.new(color.green, 80))
+            topVal = srFullRange ? high[sdLen] : low[sdLen] + zoneHeight / 2
+            bottomVal = low[sdLen]
+            maxExtend = math.min(srExtendBars, 500)
+            newBox = box.new(left=bar_index - sdLen, top=topVal, right=bar_index + maxExtend, bottom=bottomVal, border_color=na, bgcolor=color.new(color.green, 80))
             array.push(demandZones, newBox)
 
 // Clean up old zones when broken (reverse loop to avoid index issues)
