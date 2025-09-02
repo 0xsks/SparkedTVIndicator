@@ -10,3 +10,5 @@ Do it for the love of the game
 I salute you 🫡
 
 FUCK.THE.FED.
+
+<img width="2108" height="1652" alt="image" src="https://github.com/user-attachments/assets/78e464f8-da90-4952-a9e1-1cebc93215d8" />
