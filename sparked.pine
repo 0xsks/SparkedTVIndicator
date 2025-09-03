@@ -1,88 +1,100 @@
 // This Pine Script® code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
-// © Sparked0x
+// Sparked0x Released under Viral Public License
 
 //@version=6
-indicator("Sparked Beta v.02", shorttitle="Sparked", overlay=true, max_boxes_count=500, max_lines_count=500)
+indicator("Sparked Beta v.03", shorttitle="Sparked", overlay=true, max_boxes_count=500, max_lines_count=500)
 
 //Todo
-// ***SR EDITS***
-//Zone age filter → auto-fade or delete zones after n bars.
-//Touch count → mark zones that got retested multiple times (stronger).
-//Break/flip logic → if price decisively breaks a zone, flip its color to show it as invalid or “flipped support/resistance.”
-// Add sensitivity slider for 1m/5m scalping zones (to control how “tight” or “loose” the demand/supply boxes print)?
 
-
-//RSI EDITS
-//RSI Divergence detection → draw lines when price makes new highs but RSI doesn’t (and vice versa).
-
-// ***VWAP EDITS***
-// Time options for VWAP resets
-//Session VWAP selector → toggle between “entire day,” “session,” or “rolling anchor.”
-//Custom deviation profiles → e.g., 0.25, 0.5, 1.0 bands for scalping, 1.5, 2.0 for swing.
-//VWAP confluence signals → highlight when EMA200, VWAP, and SD zone overlap (high-probability scalp).
-
-// ***BB EDITS***
-// Fix Bollinger Bands not showing on chart
-
-//Visualization
-//Toggleable zone styles → filled boxes vs. dashed outlines (for minimal clutter).
-//Transparency slider → fade older zones.
-//Labels for HTF zones → small text like “1H Supply” or “4H Demand.”
-
-//Automation / Smart features
-//Scalp alerts → when price touches a fresh demand zone + RSI oversold + near VWAP band.
-//Trend filter → only show demand zones in uptrend, supply in downtrend (avoid counter-trend traps).
-//Liquidity sweep detection → wick into a zone with rejection → potential scalp trigger.
 
 // =============================
 // === Inputs
 // =============================
 
-// Supply/Demand Zones
-sdLen      = input.int(20, "Swing Length", minval=1)
-sdHTF1     = input.timeframe("60", "Higher TF 1 (zones)")
-sdHTF2     = input.timeframe("240", "Higher TF 2 (zones)")
-showSD     = input.bool(true, "Show Supply/Demand Zones")
-srExtendBars = input.int(5000, "SR Extend Bars", minval=100)
-srFullRange  = input.bool(true, "SR Use Full Swing Range")
+// Supply/Demand Zones Section
+var group_sd = "Supply/Demand Zones"
+sdLen      = input.int(20, "Swing Length", minval=1, group=group_sd, tooltip="Controls zone sensitivity: Lower = more zones (scalping), Higher = fewer zones (swing trading). Looks for highest/lowest in (length*2+1) bar window.")
+sdHTF1     = input.timeframe("60", "Higher Timeframe 1", group=group_sd, tooltip="First higher timeframe for additional zone analysis. Zones from this TF will appear as dashed lines.")
+sdHTF2     = input.timeframe("1440", "Higher Timeframe 2", group=group_sd, tooltip="Second higher timeframe for additional zone analysis. Zones from this TF will appear as dashed lines.")
+showSD     = input.bool(true, "Show Supply/Demand Zones", group=group_sd, tooltip="Toggle to show/hide all supply and demand zones on the chart.")
+srFullRange  = input.bool(true, "SR Use Full Swing Range", group=group_sd, tooltip="Use full swing range (high to low) for zone height. Disable for half-range zones.")
+srExtendBars = input.int(5000, "SR Extend Bars", minval=100, group=group_sd, tooltip="How many bars to the right supply/demand zones should extend. Max 500 due to TradingView limits.")
 
-// EMA
-showEMA200 = input.bool(true, "Show EMA 200")
+// Zone Management Section
+var group_zm = "Zone Management"
+touchCount     = input.bool(false, "Enable Touch Count", group=group_zm, tooltip="Mark zones that have been retested multiple times as stronger zones.")
+breakFlipLogic = input.bool(true, "Enable Break/Flip Logic", group=group_zm, tooltip="Flip zone colors when price decisively breaks through them, showing invalidated zones.")
+sensitivityMode = input.bool(false, "Enable Sensitivity Mode", group=group_zm, tooltip="Enable dynamic sensitivity adjustment for different market conditions.")
+sensitivityMult = input.float(1.0, "Sensitivity Multiplier", minval=0.1, maxval=3.0, group=group_zm, tooltip="Multiplier for swing length sensitivity. 1.0 = normal, <1.0 = more sensitive, >1.0 = less sensitive.")
 
-// VWAP + Deviations
-showVWAP   = input.bool(false, "Show VWAP + Deviations")
-vwapSrc    = input.source(close, "VWAP Source")
-vwapDevOn  = input.bool(true, "Show Deviation Bands")
-vwapDevSet = input.string("Daily", "VWAP Reset", options=["Session", "Daily", "Weekly", "Monthly"])
-devSteps   = input.string("0.5,1,1.5,2", "Deviation Multipliers (comma separated)")
+// Moving Averages Section
+var group_ma = "Moving Averages"
+showEMA200 = input.bool(true, "Show EMA 200", group=group_ma, tooltip="Display the 200-period Exponential Moving Average. Color changes based on price position.")
 
-// RSI & Bollinger
-showRSI    = input.bool(false, "Overlay RSI signals")
-rsiLen     = input.int(14, "RSI Length")
-// RSI gradient controls
-rsiLowerThr = input.int(30, "RSI Lower Threshold", minval=0, maxval=50)
-rsiUpperThr = input.int(70, "RSI Upper Threshold", minval=50, maxval=100)
-rsiMaxIntensity = input.int(100, "RSI Max Intensity (0-100)", minval=1, maxval=100)
-showBB     = input.bool(false, "Show Bollinger Bands")
-bbLen      = input.int(20, "BB Length")
-bbMult     = input.float(2.0, "BB Multiplier")
+// VWAP Section
+var group_vwap = "VWAP & Deviations"
+showVWAP   = input.bool(false, "Show VWAP + Deviations", group=group_vwap, tooltip="Display Volume Weighted Average Price and its standard deviation bands.")
+vwapSrc    = input.source(close, "VWAP Source", group=group_vwap, tooltip="Price source for VWAP calculation. Default is close price.")
+vwapDevOn  = input.bool(true, "Show Deviation Bands", group=group_vwap, tooltip="Show standard deviation bands around VWAP for volatility analysis.")
+vwapDevSet = input.string("Daily", "VWAP Reset", options=["Session", "Daily", "Weekly", "Monthly"], group=group_vwap, tooltip="When to reset VWAP calculation. Daily = reset each trading day.")
+devSteps   = input.string("0.5,1,1.5,2", "Deviation Multipliers (comma separated)", group=group_vwap, tooltip="Standard deviation multipliers for VWAP bands. Separate with commas.")
+customDevProfiles = input.bool(false, "Enable Custom Deviation Profiles", group=group_vwap, tooltip="Use different deviation profiles for scalping vs swing trading.")
+scalpProfile = input.string("0.25,0.5,1.0", "Scalp Profile (comma separated)", group=group_vwap, tooltip="Tighter deviation bands for scalping strategies.")
+swingProfile = input.string("1.5,2.0,2.5", "Swing Profile (comma separated)", group=group_vwap, tooltip="Wider deviation bands for swing trading strategies.")
+vwapConfluence = input.bool(false, "Enable VWAP Confluence Signals", group=group_vwap, tooltip="Highlight areas where EMA200, VWAP, and supply/demand zones overlap for high-probability setups.")
 
-// Trend Oscillator (MACD-style)
-showTO     = input.bool(true, "Show Trend Oscillator")
-toFastLen  = input.int(34, "TO Fast EMA")
-toSlowLen  = input.int(55, "TO Slow EMA")
-toSignal   = input.int(9, "TO Signal EMA")
+// RSI & Oscillators Section
+var group_rsi = "RSI & Oscillators"
+showRSI    = input.bool(false, "Overlay RSI signals", group=group_rsi, tooltip="Color bars based on RSI levels. Red when RSI > upper threshold, green when RSI < lower threshold.")
+rsiLen     = input.int(14, "RSI Length", group=group_rsi, tooltip="Period for RSI calculation. Standard is 14, lower = more sensitive, higher = smoother.")
+rsiLowerThr = input.int(30, "RSI Lower Threshold", minval=0, maxval=50, group=group_rsi, tooltip="RSI level below which bars turn green. Standard oversold level is 30.")
+rsiUpperThr = input.int(70, "RSI Upper Threshold", minval=50, maxval=100, group=group_rsi, tooltip="RSI level above which bars turn red. Standard overbought level is 70.")
+rsiMaxIntensity = input.int(100, "RSI Max Intensity (0-100)", minval=1, maxval=100, group=group_rsi, tooltip="Maximum color intensity for RSI bar coloring. Currently unused with simple red/green.")
+rsiDivergence = input.bool(false, "Enable RSI Divergence Detection", group=group_rsi, tooltip="Draw lines when price makes new highs/lows but RSI doesn't, indicating potential reversals.")
 
-// Visible Range Volume Profile (approximation via lookback)
-showVRVP          = input.bool(false, "Show Visible Range Volume Profile")
-vrvpLookbackBars  = input.int(200, "VRVP Lookback Bars", minval=10, maxval=5000)
-vrvpBins          = input.int(24, "VRVP Price Bins", minval=10, maxval=200)
-vrvpMaxWidthBars  = input.int(50, "VRVP Max Width (bars)", minval=5, maxval=200)
+// Bollinger Bands Section
+var group_bb = "Bollinger Bands"
+showBB     = input.bool(false, "Show Bollinger Bands", group=group_bb, tooltip="Display Bollinger Bands with moving average and standard deviation bands.")
+bbLen      = input.int(20, "BB Length", group=group_bb, tooltip="Period for Bollinger Band calculation. Standard is 20.")
+bbMult     = input.float(2.0, "BB Multiplier", group=group_bb, tooltip="Standard deviation multiplier for Bollinger Bands. 2.0 = 95% of price action within bands.")
 
-// ADR (New York session)
-showADR    = input.bool(true, "Show NY Session ADR")
-adrLen     = input.int(14, "ADR Length (NY sessions)", minval=1)
-nySession  = input.session("0930-1600", "NY Session (chart timezone)")
+// Trend Oscillator Section
+var group_to = "Trend Oscillator"
+showTO     = input.bool(true, "Show Trend Oscillator", group=group_to, tooltip="Display MACD-style trend oscillator in separate pane with histogram.")
+toFastLen  = input.int(34, "TO Fast EMA", group=group_to, tooltip="Fast EMA period for trend oscillator calculation.")
+toSlowLen  = input.int(55, "TO Slow EMA", group=group_to, tooltip="Slow EMA period for trend oscillator calculation.")
+toSignal   = input.int(9, "TO Signal EMA", group=group_to, tooltip="Signal line EMA period for trend oscillator.")
+
+// Volume Analysis Section
+var group_vol = "Volume Analysis"
+showVRVP          = input.bool(false, "Show Visible Range Volume Profile", group=group_vol, tooltip="Display volume profile as horizontal bars showing volume distribution across price levels.")
+vrvpLookbackBars  = input.int(200, "VRVP Lookback Bars", minval=10, maxval=5000, group=group_vol, tooltip="Number of bars to analyze for volume profile calculation.")
+vrvpBins          = input.int(24, "VRVP Price Bins", minval=10, maxval=200, group=group_vol, tooltip="Number of price levels to divide the range into for volume analysis.")
+vrvpMaxWidthBars  = input.int(50, "VRVP Max Width (bars)", minval=5, maxval=200, group=group_vol, tooltip="Maximum width of volume profile bars in bars.")
+
+// ADR Section
+var group_adr = "Average Daily Range (ADR)"
+showADR    = input.bool(true, "Show NY Session ADR", group=group_adr, tooltip="Display Average Daily Range based on New York trading session with current session high/low lines.")
+adrLen     = input.int(14, "ADR Length (NY sessions)", minval=1, group=group_adr, tooltip="Number of completed NY sessions to average for ADR calculation.")
+nySession  = input.session("0930-1600", "NY Session (chart timezone)", group=group_adr, tooltip="New York trading session times in your chart's timezone.")
+
+// Visualization Section
+var group_vis = "Visualization"
+zoneStyles = input.bool(false, "Enable Zone Style Options", group=group_vis, tooltip="Allow customization of zone appearance (filled vs dashed outline).")
+zoneStyle = input.string("Filled", "Zone Style", options=["Filled", "Dashed Outline"], group=group_vis, tooltip="Visual style for supply/demand zones.")
+transparencySlider = input.bool(false, "Enable Transparency Slider", group=group_vis, tooltip="Allow dynamic transparency adjustment for zones.")
+zoneTransparency = input.int(80, "Zone Transparency", minval=0, maxval=95, group=group_vis, tooltip="Transparency level for zones. 0 = opaque, 95 = very transparent.")
+htfLabels = input.bool(false, "Show HTF Zone Labels", group=group_vis, tooltip="Display small text labels on higher timeframe zones (e.g., '1H Supply', '4H Demand').")
+
+// Automation Section
+var group_auto = "Automation & Alerts"
+scalpAlerts = input.bool(false, "Enable Scalp Alerts", group=group_auto, tooltip="Alert when price touches fresh demand zone + RSI oversold + near VWAP band.")
+trendFilter = input.bool(false, "Enable Trend Filter", group=group_auto, tooltip="Only show demand zones in uptrends and supply zones in downtrends to avoid counter-trend traps.")
+liquiditySweep = input.bool(false, "Enable Liquidity Sweep Detection", group=group_auto, tooltip="Detect wicks into zones with rejection for potential scalp triggers.")
+
+// Trading Signals Section
+var group_signals = "Trading Signals"
+showBuySell = input.bool(true, "Show Buy/Sell Indicators", group=group_signals, tooltip="Display buy signals (price < EMA200 + RSI < 30) and sell signals (price > EMA200 + RSI > 70).")
 
 // =============================
 // === Core Logic
@@ -139,6 +151,22 @@ plot(showBB ? lower : na, "BB Lower", color=color.red, display=display.pane)
 rsi = ta.rsi(close, rsiLen)
 rsiColor = rsi > rsiUpperThr ? color.red : rsi < rsiLowerThr ? color.green : na
 barcolor(showRSI ? rsiColor : na)
+
+// =============================
+// === Buy/Sell Indicators
+// =============================
+
+// Buy signal: price below EMA200 AND RSI below 30
+buyCondition = close < ema200 and rsi < 30
+buyTrigger = buyCondition and not buyCondition[1]  // Only trigger on first bar of condition
+
+// Sell signal: price above EMA200 AND RSI above 70  
+sellCondition = close > ema200 and rsi > 70
+sellTrigger = sellCondition and not sellCondition[1]  // Only trigger on first bar of condition
+
+// Plot buy/sell indicators
+plotshape(showBuySell and buyTrigger, "Buy Signal", shape.triangleup, location.belowbar, color.green, size=size.normal, text="BUY")
+plotshape(showBuySell and sellTrigger, "Sell Signal", shape.triangledown, location.abovebar, color.red, size=size.normal, text="SELL")
 
 // =============================
 // === Trend Oscillator (MACD-style)
